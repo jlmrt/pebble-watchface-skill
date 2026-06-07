@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pebble Watchface"
+  short_description: "Create, build, and verify Pebble watchfaces"
+  default_prompt: "Use $pebble-watchface to create a battery-efficient Pebble watchface and verify it in the emulator."
