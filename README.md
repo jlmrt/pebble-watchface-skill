@@ -11,7 +11,7 @@ Default target: **Emery** (Pebble Time 2, 200x228 color display).
 After this repository is published, install the skill with Codex:
 
 ```text
-$skill-installer install https://github.com/<owner>/<repo>/tree/main/pebble-watchface
+$skill-installer install https://github.com/jlmrt/pebble-watchface-skill/tree/main/pebble-watchface
 ```
 
 Restart Codex after installation.
