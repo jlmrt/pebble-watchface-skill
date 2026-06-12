@@ -44,11 +44,51 @@ Read only the reference files relevant to the request. For weather/data watchfac
 5. For existing projects with user-facing changes, increment the app version in `package.json`, usually the patch number.
 6. Validate, clean when package metadata changed, build, and fix errors.
 7. Verify the `.pbw` archive version before installing, copying to `releases/`, or publishing.
-8. Install in QEMU, capture screenshots, visually inspect them, and iterate until the result matches the brief.
+8. Install in QEMU, wait, capture screenshots, visually inspect them, and iterate until the result matches the brief.
 9. Generate icons and preview GIFs when useful.
 10. Report final artifact paths, verification status, version confirmation, and install commands.
 
 Use subagents for independent research/design if they are available and the request is complex. If subagents are unavailable, do the research and design directly.
+
+## Emulator Discipline (MANDATORY)
+
+### Never run Pebble emulator commands in parallel
+
+`pebble install`, `pebble screenshot`, `pebble logs`, `pebble emu-button`, `pebble ping`, `pebble kill`, and `pebble wipe` share an unlocked emulator state file at `$TMPDIR/pb-emulator.json`. Run all Pebble emulator commands strictly sequentially, one at a time, even when the agent runtime encourages parallel tool calls. Never verify two platforms concurrently.
+
+### Reset, install, wait, screenshot, inspect
+
+Before the first emulator install of a session, reset persisted emulator state. A clean install auto-launches the watchface; there is no separate "select watchface" or activation command.
+
+After building, verify each platform with this exact sequence:
+
+```bash
+pebble kill
+pebble wipe
+pebble install --emulator <platform>
+sleep 3
+pebble screenshot --no-open --emulator <platform> screenshot_<platform>.png
+```
+
+Inspect the screenshot before changing app code. The screenshot is valid only if it shows the watchface. If it shows "Install an app to continue" or the system launcher, the capture is invalid; recover the emulator before any other iteration.
+
+### Recovery for "Install an app to continue"
+
+This screen usually means stale emulator/tooling state, not app code and not a missing activation step. QEMU emulator instances and Pebble tool state files such as `$TMPDIR/pb-emulator.json` can survive across sessions. Recover with:
+
+```bash
+pebble kill
+pebble wipe
+pebble install --emulator <platform>
+sleep 3
+pebble screenshot --no-open --emulator <platform> screenshot_<platform>.png
+```
+
+If the placeholder persists after `kill` and `wipe`, then suspect deeper emulator/tooling state before changing app code. Only suspect the app after a known-good PBW works in the same clean emulator session. Run `pebble logs --emulator <platform>` after install in the foreground with a short timeout, stop it after about 10 seconds, and check for a launch crash. Do not loop on screenshots.
+
+### TimeoutError handling
+
+`libpebble2.exceptions.TimeoutError` on install or screenshot usually indicates a half-booted or stale emulator instance. After a clean `pebble kill` and `pebble wipe`, retry the screenshot once before escalating. Do not retry in a tight loop.
 
 ## Project Creation
 
@@ -56,21 +96,24 @@ Prefer the scaffold script for new projects:
 
 ```bash
 python3 /path/to/pebble-watchface/scripts/create_project.py "Project Name" \
-  --animated \
   --author "Author Name" \
   --display "Display Name" \
-  --output /path/to/output
+  --output /path/to/output \
+  --targets emery
 ```
 
 Template flags:
 
-- `--animated`: animated/artistic canvas template.
+- No template flag: static or analog-style template.
+- `--animated`: animated/artistic canvas template. Use only when the brief explicitly asks for animation.
 - `--static`: static or analog-style template.
 - `--weather`: weather/data template with `src/pkjs/index.js`, AppMessage keys, and location capability.
+- `--project-dir PATH`: use `PATH` itself as the project root. It must not exist or must be empty.
+- `--targets emery`: comma-separated target platforms. If the brief lists multiple targets, pass them at scaffold time and verify `package.json` `targetPlatforms` matches before the first build.
 
 Required project files:
 
-- `package.json` with `pebble.watchapp.watchface: true`, a valid UUID, and `"targetPlatforms": ["emery"]` by default.
+- `package.json` with `pebble.watchapp.watchface: true`, a valid UUID, and `"targetPlatforms": ["emery"]` by default unless `--targets` was used.
 - `wscript` using `ctx.pbl_build(..., bin_type='app')` and `ctx.pbl_bundle(...)`.
 - `src/c/main.c` with `#include <pebble.h>`, `init()`, `deinit()`, and `main()`.
 - `src/pkjs/index.js` only for weather/web data.
@@ -134,10 +177,14 @@ If build fails, read the compiler output, patch the code, and repeat until `buil
 Install and screenshot in QEMU:
 
 ```bash
+pebble kill
+pebble wipe
 pebble install --emulator emery
+sleep 3
 pebble screenshot --no-open --emulator emery screenshot_emery.png
-pebble logs --emulator emery
 ```
+
+Run `pebble logs --emulator emery` only after install and screenshot, and only in the foreground with a short timeout when checking for crashes. Do not run it in parallel with install or screenshot.
 
 At most once per session, ask whether the user wants successful builds installed to a physical Pebble through the phone IP. Do not block emulator/PBW delivery while waiting for this. If the user opts in and provides an IP, install the verified PBW with:
 
@@ -153,6 +200,7 @@ pebble sdk install-emulator emery
 
 Use the available image inspection tool to view `screenshot_emery.png`. The verification pass must check:
 
+- Screenshot shows the watchface, not "Install an app to continue" or the system launcher. If it does, the capture is invalid; run `pebble kill`, `pebble wipe`, reinstall, wait, and screenshot before any other iteration step.
 - No clipping at screen edges.
 - Text is readable and not truncated.
 - Time/date/data positions match the planned layout.

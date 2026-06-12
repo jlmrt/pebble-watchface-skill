@@ -259,6 +259,21 @@ def validate_build_version(project_path):
     return warnings
 
 
+def get_install_target(project_path):
+    """Return the first configured target platform for next-step guidance."""
+    package_path = project_path / 'package.json'
+    try:
+        with open(package_path, 'r') as f:
+            pkg = json.load(f)
+    except Exception:
+        return 'emery'
+
+    platforms = pkg.get('pebble', {}).get('targetPlatforms', [])
+    if isinstance(platforms, list) and platforms:
+        return platforms[0]
+    return 'emery'
+
+
 def main():
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} /path/to/watchface/project")
@@ -319,7 +334,7 @@ def main():
         print("\nNext steps:")
         print(f"  1. cd {project_path}")
         print("  2. pebble build")
-        print("  3. pebble install --emulator emery")
+        print(f"  3. pebble install --emulator {get_install_target(project_path)}")
         sys.exit(0)
 
 
