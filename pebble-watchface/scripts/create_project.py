@@ -9,19 +9,25 @@ Usage:
     python create_project.py <project_name> [options]
 
 Options:
-    --animated    Use animated watchface template
+    --animated    Use animated watchface template (explicit opt-in)
     --static      Use static/analog watchface template
     --weather     Use weather watchface template (includes pkjs)
     --author      Author name
     --display     Display name for the watchface
+    --project-dir Use this exact project directory if missing or empty
+    --targets     Comma-separated target platforms, default: emery
 """
 
-import sys
 import argparse
+import json
 import re
-import uuid
 import shutil
+import sys
+import uuid
 from pathlib import Path
+
+
+VALID_TARGETS = ['aplite', 'basalt', 'chalk', 'diorite', 'emery', 'flint', 'gabbro']
 
 
 def slugify(name):
@@ -35,8 +41,31 @@ def generate_uuid():
     return str(uuid.uuid4())
 
 
-def create_package_json(project_path, name, display_name, author, template_type='animated'):
+def parse_targets(value):
+    """Parse and validate a comma-separated Pebble target platform list."""
+    requested = []
+    for raw_target in value.split(','):
+        target = raw_target.strip().lower()
+        if not target:
+            raise argparse.ArgumentTypeError('target list contains an empty value')
+        if target not in VALID_TARGETS:
+            valid = ','.join(VALID_TARGETS)
+            raise argparse.ArgumentTypeError(f'invalid target platform: {target} (valid: {valid})')
+        if target in requested:
+            raise argparse.ArgumentTypeError(f'duplicate target platform: {target}')
+        requested.append(target)
+
+    return [target for target in VALID_TARGETS if target in requested]
+
+
+def is_empty_dir(path):
+    """Return true when path is an existing empty directory."""
+    return path.is_dir() and not any(path.iterdir())
+
+
+def create_package_json(project_path, name, display_name, author, template_type='static', targets=None):
     """Create package.json file"""
+    targets = targets or ['emery']
     content = {
         "name": slugify(name),
         "author": author,
@@ -49,7 +78,7 @@ def create_package_json(project_path, name, display_name, author, template_type=
             "uuid": generate_uuid(),
             "sdkVersion": "3",
             "enableMultiJS": True,
-            "targetPlatforms": ["emery"],
+            "targetPlatforms": targets,
             "watchapp": {
                 "watchface": True
             },
@@ -64,7 +93,6 @@ def create_package_json(project_path, name, display_name, author, template_type=
         content["pebble"]["capabilities"] = ["location"]
         content["pebble"]["messageKeys"] = ["TEMPERATURE", "CONDITIONS", "REQUEST_WEATHER"]
 
-    import json
     with open(project_path / 'package.json', 'w') as f:
         json.dump(content, f, indent=2)
 
@@ -159,7 +187,7 @@ def copy_template(project_path, template_type, skill_path):
         'weather': 'weather-watchface.c'
     }
 
-    template_file = c_templates.get(template_type, 'animated-watchface.c')
+    template_file = c_templates.get(template_type, 'static-watchface.c')
     template_path = skill_path / 'templates' / template_file
 
     # C project structure
@@ -191,50 +219,63 @@ def copy_template(project_path, template_type, skill_path):
 def main():
     parser = argparse.ArgumentParser(description='Create a new Pebble watchface project')
     parser.add_argument('name', help='Project name')
-    parser.add_argument('--animated', action='store_true', help='Use animated template')
-    parser.add_argument('--static', action='store_true', help='Use static/analog template')
-    parser.add_argument('--weather', action='store_true', help='Use weather template (includes pkjs)')
+    template_group = parser.add_mutually_exclusive_group()
+    template_group.add_argument('--animated', action='store_true', help='Use animated template (explicit opt-in)')
+    template_group.add_argument('--static', action='store_true', help='Use static/analog template (default)')
+    template_group.add_argument('--weather', action='store_true', help='Use weather template (includes pkjs)')
     parser.add_argument('--author', default='Your Name', help='Author name')
     parser.add_argument('--display', default=None, help='Display name')
     parser.add_argument('--output', '-o', default='.', help='Output directory')
+    parser.add_argument('--project-dir', default=None,
+                        help='Use this exact project directory if it does not exist or is empty')
+    parser.add_argument('--targets', type=parse_targets, default=parse_targets('emery'),
+                        help='Comma-separated target platforms (default: emery)')
 
     args = parser.parse_args()
 
     # Determine template type
-    if args.static:
-        template_type = 'static'
+    if args.animated:
+        template_type = 'animated'
     elif args.weather:
         template_type = 'weather'
     else:
-        template_type = 'animated'
+        template_type = 'static'
 
     display_name = args.display or args.name
 
-    # Create project directory
-    output_path = Path(args.output).expanduser().resolve()
+    # Resolve project directory
     project_slug = slugify(args.name)
 
     if not project_slug:
         print("Error: Project name must contain at least one letter or number")
         sys.exit(1)
 
-    project_path = (output_path / project_slug).resolve()
-    try:
-        project_path.relative_to(output_path)
-    except ValueError:
-        print(f"Error: Project path must stay inside output directory: {output_path}")
+    if args.project_dir:
+        project_path = Path(args.project_dir).expanduser().resolve()
+    else:
+        output_path = Path(args.output).expanduser().resolve()
+        project_path = (output_path / project_slug).resolve()
+        try:
+            project_path.relative_to(output_path)
+        except ValueError:
+            print(f"Error: Project path must stay inside output directory: {output_path}")
+            sys.exit(1)
+
+    if project_path.exists() and not project_path.is_dir():
+        print(f"Error: Project path exists and is not a directory: {project_path}")
         sys.exit(1)
 
-    if project_path.exists():
-        print(f"Error: Directory already exists: {project_path}")
+    if project_path.exists() and not is_empty_dir(project_path):
+        print(f"Error: Directory already exists and is not empty: {project_path}")
         sys.exit(1)
 
     print(f"\nCreating Pebble watchface project: {args.name}")
     print(f"Template: {template_type}")
+    print(f"Targets: {', '.join(args.targets)}")
     print(f"Location: {project_path}\n")
 
     # Create directories
-    project_path.mkdir(parents=True)
+    project_path.mkdir(parents=True, exist_ok=True)
     (project_path / 'resources' / 'fonts').mkdir(parents=True)
     (project_path / 'resources' / 'images').mkdir(parents=True)
 
@@ -243,7 +284,7 @@ def main():
     skill_path = script_path.parent
 
     # Create files
-    create_package_json(project_path, args.name, display_name, args.author, template_type)
+    create_package_json(project_path, args.name, display_name, args.author, template_type, args.targets)
     create_wscript(project_path)
     create_gitignore(project_path)
     copy_template(project_path, template_type, skill_path)
@@ -253,7 +294,7 @@ def main():
     print(f"  1. cd {project_path}")
     print(f"  2. Edit src/c/main.c (or src/pkjs/index.js)")
     print(f"  3. pebble build")
-    print(f"  4. pebble install --emulator emery")
+    print(f"  4. pebble install --emulator {args.targets[0]}")
 
 
 if __name__ == '__main__':

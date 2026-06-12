@@ -17,10 +17,11 @@
 
 #define WATCHFACE_NAME "My Animated Watch"
 
-// Animation settings
-#define ANIMATION_INTERVAL 50           // Normal: 50ms = 20 FPS
-#define ANIMATION_INTERVAL_LOW_POWER 100 // Low battery: 100ms = 10 FPS
+// Animation settings. Continuous animation only if the user explicitly requested it.
+#define ANIMATION_INTERVAL 50            // Burst frame interval: 50ms = 20 FPS
+#define ANIMATION_INTERVAL_LOW_POWER 100 // Low battery burst interval: 100ms = 10 FPS
 #define LOW_BATTERY_THRESHOLD 20        // Throttle below 20%
+#define ANIMATION_BURST_FRAMES 24       // About 1.2s at normal speed
 
 // Element counts - adjust based on your design
 #define MAX_PARTICLES 8
@@ -66,6 +67,7 @@ static Particle s_particles[MAX_PARTICLES];
 
 // Animation state
 static int32_t s_animation_phase = 0;
+static uint16_t s_animation_frames_remaining = 0;
 
 // Pre-allocated paths (for complex shapes)
 static GPath *s_shape_path = NULL;
@@ -74,6 +76,9 @@ static GPathInfo s_shape_info = {
     .num_points = 4,
     .points = s_shape_points
 };
+
+static void animation_timer_callback(void *data);
+static void start_animation_burst(uint16_t frames);
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -270,21 +275,43 @@ static void update_time(void) {
 
 static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
     update_time();
+    start_animation_burst(ANIMATION_BURST_FRAMES);
 }
 
 // ============================================================================
 // TIMER HANDLING
 // ============================================================================
 
+static uint32_t get_animation_interval(void) {
+    return (s_battery_level <= LOW_BATTERY_THRESHOLD && !s_is_charging)
+           ? ANIMATION_INTERVAL_LOW_POWER
+           : ANIMATION_INTERVAL;
+}
+
+static void schedule_animation_frame(void) {
+    if (!s_animation_timer && s_animation_frames_remaining > 0) {
+        s_animation_timer = app_timer_register(get_animation_interval(), animation_timer_callback, NULL);
+    }
+}
+
+static void start_animation_burst(uint16_t frames) {
+    if (frames > s_animation_frames_remaining) {
+        s_animation_frames_remaining = frames;
+    }
+    schedule_animation_frame();
+}
+
 static void animation_timer_callback(void *data) {
+    (void)data;
+    s_animation_timer = NULL;
+
+    if (s_animation_frames_remaining == 0) {
+        return;
+    }
+
     animation_update();
-
-    // Schedule next frame (battery-aware)
-    uint32_t interval = (s_battery_level <= LOW_BATTERY_THRESHOLD && !s_is_charging)
-                        ? ANIMATION_INTERVAL_LOW_POWER
-                        : ANIMATION_INTERVAL;
-
-    s_animation_timer = app_timer_register(interval, animation_timer_callback, NULL);
+    s_animation_frames_remaining--;
+    schedule_animation_frame();
 }
 
 // ============================================================================
@@ -352,8 +379,8 @@ static void main_window_load(Window *window) {
     // Create pre-allocated paths
     s_shape_path = gpath_create(&s_shape_info);
 
-    // Start animation timer
-    s_animation_timer = app_timer_register(ANIMATION_INTERVAL, animation_timer_callback, NULL);
+    // Start a short initial burst. Continuous animation only if the user explicitly requested it.
+    start_animation_burst(ANIMATION_BURST_FRAMES);
 
     // Initial time update
     update_time();
@@ -361,6 +388,7 @@ static void main_window_load(Window *window) {
 
 static void main_window_unload(Window *window) {
     // Cancel animation timer
+    s_animation_frames_remaining = 0;
     if (s_animation_timer) {
         app_timer_cancel(s_animation_timer);
         s_animation_timer = NULL;
