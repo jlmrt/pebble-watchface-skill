@@ -56,25 +56,23 @@ Use subagents for independent research/design if they are available and the requ
 
 `pebble install`, `pebble screenshot`, `pebble logs`, `pebble emu-button`, `pebble ping`, `pebble kill`, and `pebble wipe` share an unlocked emulator state file at `$TMPDIR/pb-emulator.json`. Run all Pebble emulator commands strictly sequentially, one at a time, even when the agent runtime encourages parallel tool calls. Never verify two platforms concurrently.
 
-### Reset, install, wait, screenshot, inspect
+### Install, wait, screenshot, inspect
 
-Before the first emulator install of a session, reset persisted emulator state. A clean install auto-launches the watchface; there is no separate "select watchface" or activation command.
+A clean install auto-launches the watchface; there is no separate "select watchface" or activation command. In a single, uncontended session on `pebble-tool` 5.0.38, repeated plain installs and screenshots were stable. Do not run `pebble kill` and `pebble wipe` by default for every first install.
 
 After building, verify each platform with this exact sequence:
 
 ```bash
-pebble kill
-pebble wipe
 pebble install --emulator <platform>
 sleep 3
 pebble screenshot --no-open --emulator <platform> screenshot_<platform>.png
 ```
 
-Inspect the screenshot before changing app code. The screenshot is valid only if it shows the watchface. If it shows "Install an app to continue" or the system launcher, the capture is invalid; recover the emulator before any other iteration.
+Inspect the screenshot before changing app code. The screenshot is valid only if it shows the watchface. If it shows "Install an app to continue", the system launcher, or an unexpected different watchface, the capture is invalid; recover the emulator before any other iteration.
 
 ### Recovery for "Install an app to continue"
 
-This screen usually means stale emulator/tooling state, not app code and not a missing activation step. QEMU emulator instances and Pebble tool state files such as `$TMPDIR/pb-emulator.json` can survive across sessions. Recover with:
+This screen usually means stale or shared emulator/tooling state, not app code and not a missing activation step. QEMU emulator instances and Pebble tool state files such as `$TMPDIR/pb-emulator.json` can survive across sessions, and another session touching the same emulator can leave screenshots pointed at the wrong face. Recover with:
 
 ```bash
 pebble kill
@@ -84,11 +82,11 @@ sleep 3
 pebble screenshot --no-open --emulator <platform> screenshot_<platform>.png
 ```
 
-If the placeholder persists after `kill` and `wipe`, then suspect deeper emulator/tooling state before changing app code. Only suspect the app after a known-good PBW works in the same clean emulator session. Run `pebble logs --emulator <platform>` after install in the foreground with a short timeout, stop it after about 10 seconds, and check for a launch crash. Do not loop on screenshots.
+Use this recovery flow when the emulator has been shared with another session, when the screenshot is wrong, or when plain install plus screenshot stops matching the app you just installed. If the placeholder persists after `kill` and `wipe`, then suspect deeper emulator/tooling state before changing app code. Only suspect the app after a known-good PBW works in the same clean emulator session. Run `pebble logs --emulator <platform>` after install in the foreground with a short timeout, stop it after about 10 seconds, and check for a launch crash. Do not loop on screenshots.
 
 ### TimeoutError handling
 
-`libpebble2.exceptions.TimeoutError` on install or screenshot usually indicates a half-booted or stale emulator instance. After a clean `pebble kill` and `pebble wipe`, retry the screenshot once before escalating. Do not retry in a tight loop.
+`libpebble2.exceptions.TimeoutError` on install or screenshot usually indicates a half-booted or stale emulator instance. Retry the screenshot once after the same install. If it still fails, run `pebble kill` and `pebble wipe`, reinstall, then retry once more. Do not retry in a tight loop.
 
 ## Project Creation
 
@@ -177,8 +175,6 @@ If build fails, read the compiler output, patch the code, and repeat until `buil
 Install and screenshot in QEMU:
 
 ```bash
-pebble kill
-pebble wipe
 pebble install --emulator emery
 sleep 3
 pebble screenshot --no-open --emulator emery screenshot_emery.png
@@ -200,7 +196,7 @@ pebble sdk install-emulator emery
 
 Use the available image inspection tool to view `screenshot_emery.png`. The verification pass must check:
 
-- Screenshot shows the watchface, not "Install an app to continue" or the system launcher. If it does, the capture is invalid; run `pebble kill`, `pebble wipe`, reinstall, wait, and screenshot before any other iteration step.
+- Screenshot shows the watchface, not "Install an app to continue", the system launcher, or an unexpected different watchface. If it does, the capture is invalid; run `pebble kill`, `pebble wipe`, reinstall, wait, and screenshot before any other iteration step.
 - No clipping at screen edges.
 - Text is readable and not truncated.
 - Time/date/data positions match the planned layout.
