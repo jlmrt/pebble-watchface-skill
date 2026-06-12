@@ -37,6 +37,7 @@ Read only the reference files relevant to the request. For weather/data watchfac
 
 ## Workflow
 
+0. Preflight: run `pebble --version` once per session and compare it against the latest `pebble-tool` release using `pip index versions pebble-tool` or the GitHub releases page. If the installed version is outdated, stop and ask the user whether they want to upgrade before continuing. Do not auto-upgrade mid-session. Known emulator lifecycle bugs in older versions, including `<=5.0.37` where the emulator can die when the spawning command's process group exits, can create false failures that look like app bugs.
 1. Clarify only genuinely blocking details. If the brief is underspecified, choose sensible defaults: digital or illustrative time display, optional date, no weather unless asked, emery target.
 2. Plan the layout before writing code. Calculate y positions, heights, x positions, widths, and bottom/right edges for each element.
 3. Scaffold or create the project.
@@ -71,6 +72,8 @@ pebble screenshot --no-open --emulator <platform> screenshot_<platform>.png
 Inspect the screenshot before changing app code. The screenshot is valid only if it shows the watchface. If it shows "Install an app to continue", the system launcher, or an unexpected different watchface, the capture is invalid; recover the emulator before any other iteration.
 
 ### Recovery for "Install an app to continue"
+
+Before anything else, run `pebble --version`. If it is not current, ask the user to upgrade and retry the install plus screenshot sequence before debugging further. Do not debug this symptom on an outdated tool.
 
 This screen usually means stale or shared emulator/tooling state, not app code and not a missing activation step. QEMU emulator instances and Pebble tool state files such as `$TMPDIR/pb-emulator.json` can survive across sessions, and another session touching the same emulator can leave screenshots pointed at the wrong face. Recover with:
 
